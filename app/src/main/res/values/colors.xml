@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#167D5B</color>
+    <color name="primary_dark">#0E5A40</color>
+    <color name="secondary">#2D6A91</color>
+    <color name="expense">#C54848</color>
+    <color name="surface_light">#F8FCF9</color>
+    <color name="nav_bg">#F5FBF7</color>
+</resources>

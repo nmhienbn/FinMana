@@ -4,12 +4,19 @@
 
 ## Chức năng hiện có
 
-- Đọc notification qua `NotificationListenerService`, bỏ qua notification của chính app.
+- Đọc notification qua `NotificationListenerService`, bỏ qua notification của chính app và app đã loại trừ.
 - Nhận dạng số tiền và chiều giao dịch bằng parser cục bộ, pattern đã học, sau đó mới dùng AI fallback.
 - Lưu giao dịch, ghi chú, danh mục và trạng thái đồng bộ trong Room.
 - Dashboard thu/chi và biểu đồ theo ngày, tuần, tháng, quý, năm.
-- Đăng nhập Google, tạo thư mục `FinMana`, tạo Google Sheet và append giao dịch.
+- Đăng nhập Google, tìm hoặc tạo thư mục `FinMana`, tìm hoặc tạo Google Sheet và ghi giao dịch.
+- Đồng bộ 2 chiều: đẩy giao dịch lên Sheet và kéo giao dịch từ Sheet xuống app.
+- Mỗi năm 1 spreadsheet (`FinMana 2026`), mỗi tháng 1 sheet (`01`–`12`), sheet `Danh mục` cho danh mục.
+- Thùng rác: xóa giao dịch chuyển vào thùng rác (soft delete), khôi phục được; tự dọn sau 30 ngày.
+- Đồng bộ danh mục giữa app và Sheet.
+- App loại trừ: bỏ qua notification từ app không phải ngân hàng/ví (có thể thêm/bớt trong Cài đặt).
+- Kiểm tra quyền đọc thông báo khi mở app; hiển thị trạng thái quyền trong tab Cài đặt.
 - API AI dạng OpenAI-compatible; pattern hợp lệ do AI đề xuất được lưu để tái sử dụng.
+- Tự động lấy danh sách model từ API khi nhập URL và API key, thay vì nhập tay tên model.
 
 ## Chạy project
 
@@ -113,17 +120,71 @@ Google đã đổi OAuth consent screen thành khu vực **Google Auth Platform*
 
 ## Cấu hình AI
 
-Trong tab **Cài đặt**, nhập URL đầy đủ của endpoint chat completions, API key và model. Ví dụ URL:
+Trong tab **Cài đặt**, nhập URL đầy đủ của endpoint chat completions và API key, sau đó nhấn **Lấy model** để tự động tải danh sách model có sẵn. Ví dụ URL:
 
 ```text
 https://api.example.com/v1/chat/completions
 ```
 
-API key hiện được lưu cục bộ bằng DataStore. Với bản production, nên đưa lời gọi AI qua backend riêng hoặc mã hóa secret bằng Android Keystore; không nên phát hành APK chứa key dùng chung.
+API key hiện được lưu cục bộ bằng SharedPreferences. Với bản production, nên đưa lời gọi AI qua backend riêng hoặc mã hóa secret bằng Android Keystore; không nên phát hành APK chứa key dùng chung.
+
+## Cấu trúc Google Sheet
+
+Khi đồng bộ lần đầu, FinMana tìm hoặc tạo trong Google Drive:
+
+```
+FinMana/                        ← thư mục
+  FinMana 2026                  ← spreadsheet cho năm 2026
+    01                          ← sheet tháng 1
+    02                          ← sheet tháng 2
+    ...
+    12                          ← sheet tháng 12
+    Danh mục                    ← sheet danh mục
+  FinMana 2027                  ← spreadsheet cho năm 2027 (tự tạo khi có giao dịch)
+```
+
+Nếu thư mục `FinMana` hoặc spreadsheet `FinMana YYYY` đã tồn tại trên Drive, app sẽ dùng lại thay vì tạo mới.
+
+**Sheet hàng tháng** có cột:
+
+| Thời gian | Loại | Số tiền | Danh mục | Ghi chú | Nguồn | Parser | Package | Thông báo gốc | Mã ĐB |
+|-----------|------|---------|----------|---------|-------|--------|---------|---------------|-------|
+
+- **Thời gian**: định dạng `yyyy-MM-dd HH:mm:ss` (ví dụ: `2026-06-09 21:13:34`).
+- **Loại**: `INCOME` hoặc `EXPENSE` (dropdown).
+- **Số tiền**: định dạng `#,##0`.
+- **Danh mục**: dropdown tham chiếu đến cột **Tên danh mục** trong sheet `Danh mục`.
+- **Ghi chú**: mô tả chi tiết (ví dụ: tên người nhận, nội dung giao dịch ngắn).
+- **Nguồn**: tên hiển thị của app nguồn (ví dụ: `MB Bank`, `SmartBanking`).
+- **Parser**: cách app nhận diện giao dịch (`local`, `ai`, `sheet`).
+- **Package**: package name của app nguồn (ví dụ: `com.mbmobile`, `com.vnpay.bidv`).
+- **Thông báo gốc**: nội dung notification gốc, dùng để tra cứu.
+- **Mã ĐB**: mã đồng bộ deterministic, để trống khi nhập tay trên Sheet → app tự gán khi sync xuống và ghi ngược lại lên Sheet.
+
+**Sheet Danh mục** có cột:
+
+| Tên danh mục | Loại |
+|---------------|------|
+
+Danh mục được đồng bộ 2 chiều giữa app và Sheet.
+
+## Luồng đồng bộ
+
+1. **Đảm bảo spreadsheet tồn tại** — tìm trên Drive hoặc tạo mới; bổ sung sheet thiếu.
+2. **Kéo dữ liệu** — đọc tất cả sheet hàng tháng và sheet danh mục.
+3. **Ghi ID ngược** — với dòng trên Sheet chưa có Mã ĐB, gán deterministic ID (`SHA-256`) và cập nhật lại Sheet.
+4. **Gộp vào local** — match theo Mã ĐB, fallback theo (số tiền, loại, ngày, package) để tránh trùng lặp.
+5. **Đẩy lên Sheet** — push giao dịch local chưa đồng bộ.
+
+Giao dịch đã xóa (trong thùng rác) không được đẩy lên Sheet.
 
 ## Lưu ý
 
-- Người dùng phải tự bật quyền đọc thông báo trong Android Settings.
+- Khi mở app, FinMana kiểm tra quyền đọc thông báo và nhắc nếu chưa cấp.
+- Người dùng phải bật quyền đọc thông báo trong Android Settings.
 - Một số app ngân hàng ẩn nội dung notification hoặc không phát notification đầy đủ; FinMana không thể đọc phần bị app nguồn che.
-- Google sync hiện là thao tác thủ công. Giao dịch chưa sync được giữ lại để retry.
+- Google sync 2 chiều. Nhấn "Đồng bộ ngay" để đẩy giao dịch mới lên Sheet và kéo giao dịch từ Sheet xuống app.
+- Giao dịch nhập tay trên Sheet (để trống Mã ĐB) sẽ được app tự gán ID deterministic và cập nhật lại cột Mã ĐB trên Sheet.
+- Giao dịch đã xóa được giữ trong thùng rác 30 ngày trước khi tự xóa vĩnh viễn.
+- App loại trừ có thể thêm/bớt trong tab Cài đặt để bỏ qua notification không phải ngân hàng/ví.
 - Cần rà soát chính sách Google Play về quyền truy cập notification trước khi phát hành.

@@ -1,10 +1,11 @@
 <resources>
-    <style name="Theme.FinMana" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.FinMana" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#167D5B</item>
+        <item name="colorPrimaryVariant">#0E5A40</item>
+        <item name="colorSecondary">#2D6A91</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#167D5B</item>
         <item name="android:navigationBarColor">#F5FBF7</item>
         <item name="android:statusBarColor">#F5FBF7</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
-
